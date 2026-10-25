@@ -1,0 +1,135 @@
+﻿# P5_Four_task — STM32F103 + FreeRTOS 四任务数据采集系统
+
+> 用 FreeRTOS 把「采集 → 滤波 → 通信 → 显示」拆成四个独立任务，
+> 任务之间只通过队列传递数据，任何一环变慢都不会阻塞其他任务。
+
+
+## 1. 项目简介
+
+这个项目的重点不是"点亮外设"，而是验证一套**任务解耦**的嵌入式软件结构：
+
+- 采集任务只负责按周期读传感器，不关心数据怎么处理
+- 滤波任务只做数据处理，不直接碰硬件
+- 通信任务只负责对外输出
+- 显示任务只刷新 OLED，优先级最低，可以被抢占
+
+四个任务通过 3 个队列连接，采样周期和刷新周期相互独立。
+
+| 项 | 值 |
+|---|---|
+| MCU | **STM32F103C8T6**（Cortex-M3，72 MHz） |
+| RTOS | FreeRTOS（CMSIS-RTOS v2 封装） |
+| HAL | STM32Cube FW_F1 V1.8.7 |
+| 构建 | CMake + Ninja + arm-none-eabi-gcc |
+| 配置 | STM32CubeMX（`P5_Four_task.ioc`） |
+
+## 2. 硬件与外设
+
+| 外设 | 用途 | 接口 | 引脚 |
+|---|---|---|---|
+| OLED | 显示实时数据 | I2C1 | TODO: SCL/SDA |
+| MPU6050 | 三轴加速度 | I2C1 | TODO |
+| INA219 | 电流/电压检测 | I2C1 | TODO |
+| DS18B20 | 温度 | 1-Wire（GPIO） | TODO: DQ |
+| USART1 | 调试/上报 | UART | TODO: TX/RX |
+| ADC1 | 模拟量采集 | ADC | TODO: 通道 |
+
+> 完整引脚定义见 `Core/Src/gpio.c`、`i2c.c`、`usart.c`、`adc.c`。
+
+## 3. 任务设计
+
+| 任务 | 优先级 | 栈大小 | 职责 | 数据来源 | 输出去向 |
+|---|---|---|---|---|---|
+| `sensortask` | High | 1024 B | 周期采集 MPU6050 / INA219 / DS18B20 | 硬件 | `sensorqueue` |
+| `filtertask` | Normal | 1024 B | 滤波、单位换算、组包 | `sensorqueue` | `displayqueue`、`commuqueue` |
+| `commutask` | BelowNormal | 1024 B | 串口上报 | `commuqueue` | USART1 |
+| `displaytask` | Low | 2048 B | 刷新 OLED | `displayqueue` | OLED |
+
+**数据流：**
+
+```
+传感器 ──► sensortask ──sensorqueue──► filtertask ──┬─displayqueue─► displaytask ──► OLED
+                                                   └─commuqueue───► commutask ───► USART1
+```
+
+**设计要点：**
+
+1. **采集优先级最高**：保证采样周期稳定，不被刷屏打断。
+2. **显示优先级最低**：OLED 刷新慢，允许被抢占。
+3. **显示栈最大（2 KB）**：OLED 刷新函数调用层级较深，栈需求更高。
+4. **队列解耦**：某一环阻塞时数据在队列里排队，不至于丢帧或死锁。
+
+## 4. 目录结构
+
+```
+P5_Four_task/
+├── Core/
+│   ├── app/
+│   │   ├── drivers/        # 业务驱动：oled / ds18b20 / mpu6050 / ina219 / font
+│   │   ├── tasks/          # 四个任务实现
+│   │   └── types/          # 公共数据类型
+│   ├── Inc/                # CubeMX 生成的配置头文件
+│   └── Src/                # 初始化代码 + freertos.c
+├── Drivers/                # HAL + CMSIS（由 CubeMX 生成）
+├── Middlewares/            # FreeRTOS 源码
+├── cmake/                  # 交叉编译工具链配置
+├── CMakeLists.txt
+├── CMakePresets.json
+├── P5_Four_task.ioc        # CubeMX 工程
+├── STM32F103XX_FLASH.ld
+└── startup_stm32f103xb.s
+```
+
+## 5. 编译与烧录
+
+### CLion（推荐）
+
+1. 用 CLion 打开本目录，等待 CMake 自动配置
+2. 选择 `Debug` 预设
+3. 配置 OpenOCD / ST-Link 后直接下载
+
+### 命令行
+
+```bash
+cmake --preset Debug
+cmake --build build/Debug
+```
+
+产物：`build/Debug/P5_Four_task.elf`
+
+> 仓库中没有提交 `build/`，首次编译会自动生成。
+
+## 6. 遇到的问题与解决
+
+> 这一节是最容易被面试官追问的部分，务必写真实经历。
+
+1. **OLED 刷新导致采样周期抖动**
+   现象：刷屏时采样间隔不稳定。
+   原因：显示代码里用了阻塞延时。
+   解决：把 `displaytask` 优先级降到 Low，并把 `osDelay` 换成 `vTaskDelayUntil`，保证固定周期。
+   TODO: 按实际情况修改
+
+2. **DS18B20 读数偶发 85℃**
+   现象：上电第一次读取总是 85。
+   原因：转换时间不足就读取了暂存器。
+   解决：启动转换后延时 750 ms 再读。TODO: 确认实际值
+
+3. **队列满导致任务卡住**
+   现象：传感器数据突然停更。
+   原因：消费者太慢，队列写满后阻塞。
+   解决：写入时用 0 超时，队列满就丢弃最旧数据。
+   TODO: 补充你的处理方式
+
+4. **I2C 上多个从机地址冲突** TODO
+
+## 7. 后续计划
+
+- [ ] 增加参数掉电保存（Flash 模拟 EEPROM）
+- [ ] 用 DMA + 空闲中断重写串口接收
+- [ ] 加一个 Modbus RTU 从机，支持上位机读取
+- [ ] 补 PC 端单元测试（滤波算法）
+
+## 8. 作者
+
+王艳广 · 嵌入式方向 · 2027 届
+GitHub：[@wangyanguang-embedded](https://github.com/wangyanguang-embedded)
