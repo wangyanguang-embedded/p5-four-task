@@ -27,14 +27,15 @@
 
 | 外设 | 用途 | 接口 | 引脚 |
 |---|---|---|---|
-| OLED | 显示实时数据 | I2C1 | TODO: SCL/SDA |
-| MPU6050 | 三轴加速度 | I2C1 | TODO |
-| INA219 | 电流/电压检测 | I2C1 | TODO |
-| DS18B20 | 温度 | 1-Wire（GPIO） | TODO: DQ |
-| USART1 | 调试/上报 | UART | TODO: TX/RX |
-| ADC1 | 模拟量采集 | ADC | TODO: 通道 |
+| OLED | 显示实时数据 | I2C1 | SCL=PB6，SDA=PB7 |
+| MPU6050 | 三轴加速度 | I2C1 | SCL=PB6，SDA=PB7（地址 0x68） |
+| INA219 | 电流/电压检测 | I2C1 | SCL=PB6，SDA=PB7（地址 0x40） |
+| DS18B20 | 温度 | 1-Wire | PB0 |
+| USART1 | 调试/上报 | UART | TX=PA9，RX=PA10 |
+| ADC1 | 模拟量采集 | ADC | PA0（通道 0） |
+| SWD | 下载调试 | SWD | PA13=SWDIO，PA14=SWCLK |
 
-> 完整引脚定义见 `Core/Src/gpio.c`、`i2c.c`、`usart.c`、`adc.c`。
+> 三个 I2C 设备共用一条总线（PB6/PB7），通过从机地址区分。
 
 ## 3. 任务设计
 
