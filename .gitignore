@@ -1,0 +1,43 @@
+# ===== 编译产物 =====
+build/
+cmake-build-*/
+*.o
+*.obj
+*.elf
+*.bin
+*.hex
+*.map
+*.d
+*.su
+*.a
+*.lib
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+
+# ===== 工具链缓存 =====
+.cache/
+compile_commands.json
+
+# ===== 系统文件 =====
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ===== 裁掉 CMSIS 里用不到的大块（F103 工程不需要）=====
+# 保留 Core / Device / Include，这三块是编译必需的
+Drivers/CMSIS/Lib/
+Drivers/CMSIS/DSP/
+Drivers/CMSIS/NN/
+Drivers/CMSIS/Core_A/
+Drivers/CMSIS/RTOS/
+Drivers/CMSIS/RTOS2/
+Drivers/CMSIS/docs/
+
+# ===== 敏感信息 =====
+.env
+*.pem
+*.key
+secrets.h
